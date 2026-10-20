@@ -28,11 +28,11 @@ kinematics:
     tibia: 119.6
 
   standing_height: 100.0   # mm, body height when standing
-  # mm, neutral foot distance from its mount (the coxa axis). Chosen so the tibia
-  # is vertical at standing_height: coxa + femur * cos(asin((tibia - standing_height) / femur)).
-  # A vertical tibia puts the foot under the tibia joint, so the body weight does
-  # not torque the tibia servo and the femur lever stays short. Recompute it when
-  # standing_height or the link lengths change
+  # mm, neutral foot distance from its mount (the coxa axis). The tibia would be
+  # vertical at coxa + femur * cos(asin((tibia - standing_height) / femur)), 142 mm
+  # at this height; 110 tucks the foot ~16 deg inboard of the knee, which shortens
+  # the femur lever to 42 mm (less femur torque, a little on the tibia instead).
+  # Recompute when standing_height or the link lengths change
   stance_radius: 110
 
   # Where each leg mounts on the body: position [x, y, z] mm and orientation
@@ -69,29 +69,30 @@ gaits:
 
   # One full gait cycle every cycle_time seconds at any speed (constant cadence),
   # shared by every gait. Each leg swings for (1 - duty_factor) of the cycle, so
-  # wave (1/6) and ripple (1/3) swing much faster than tripod (0.45). Their lift
-  # and stride are cut to keep the peak joint speed under ~400 deg/s, inside the
-  # MG996R's ~430 deg/s no-load. Retune all three whenever cycle_time changes
-  cycle_time: 1.0
+  # wave (1/6) and ripple (1/3) swing much faster than tripod (0.45): the same
+  # lift comes down faster and lands harder. Their lifts are the highest that
+  # still touch down as softly as tripod's 50 mm in simulation (~100 mm/s or
+  # less); retune them whenever cycle_time changes
+  cycle_time: 1.0      # s
 
   # duty_factor: fraction of the cycle a foot is on the ground
   # max_stride:  reachable step ceiling (mm); speed grows the step up to here
   tripod:
     duty_factor: 0.55    # > 0.5 so both tripods share the load briefly at each switch
-    step_height: 50.0    # mm, 290 ms swing
-    max_stride: 120.0     # mm, top speed ~252 mm/s; keeps the corner tibias within ~16 deg of vertical
+    step_height: 50.0    # mm, 450 ms swing
+    max_stride: 120.0    # mm, top speed ~218 mm/s
     overlap: 0.0
 
   wave:
     duty_factor: 0.8333  # 5/6: one leg in the air at a time; any lower and two swing at once
-    step_height: 50.0    # mm, 108 ms swing: a higher lift outruns the servos
-    max_stride: 45.0     # mm, top speed ~83 mm/s
+    step_height: 12.5    # mm, 167 ms swing; at 50 mm it lands ~3x harder
+    max_stride: 45.0     # mm, top speed ~54 mm/s
     overlap: 0.0
 
   ripple:
     duty_factor: 0.67    # ~2/3: one diagonal pair in the air at a time
-    step_height: 50.0    # mm, 215 ms swing
-    max_stride: 85.0     # mm, top speed ~195 mm/s
+    step_height: 25.0    # mm, 330 ms swing; at 50 mm it lands ~2.5x harder
+    max_stride: 85.0     # mm, top speed ~127 mm/s
     overlap: 0.0
 
 safety:
@@ -100,11 +101,12 @@ safety:
   current_max: 12.0        # A, software over-current cutoff to FAULT
 
   # Fastest the gaits can actually walk, so the full stick travel is usable. Tripod
-  # reaches max_stride / (duty_factor * cycle_time) = 90 / (0.55 * 0.65) = 252 mm/s,
-  # and turning tops out where the outermost foot (232 mm from the center) hits
-  # max_stride: 62 deg/s. Recompute both when cycle_time or the tripod numbers change
-  lin_vel_max: 252         # mm/s
-  ang_vel_max: 62          # deg/s
+  # reaches max_stride / (duty_factor * cycle_time) = 120 / (0.55 * 1.0) = 218 mm/s,
+  # and turning tops out where the outermost foot (209 mm from the center) hits
+  # max_stride: 60 deg/s. Recompute both when cycle_time, stance_radius or the
+  # tripod numbers change
+  lin_vel_max: 218         # mm/s
+  ang_vel_max: 60          # deg/s
   # s, first-order velocity smoothing. A stop shrinks the stride of the grounded
   # feet as the speed decays; faster than this and a full-speed stop asks the
   # joints for more than the servos can do (~580 deg/s at 0.05 s, ~420 at 0.2 s)
@@ -140,16 +142,19 @@ hardware:
     middle_left:  [12, 13, 14]
     front_left:   [15, 16, 17]
 
-  # Servo calibration offsets in degrees, per leg [coxa, femur, tibia]. Structural
-  # (e.g. the tibia link is a triangle, so servo -163 deg = kinematic 0). With
+  # Structural offsets in degrees, per leg [coxa, femur, tibia], from the CAD. The
+  # tibia's kinematic line runs from its joint to the foot tip, and the tibia mount
+  # is displaced from the joint, so servo -69.5 deg = kinematic 0 (tibia in line
+  # with the femur). A tibia that LOOKS vertical is not kinematically vertical:
+  # never tune these by eye, per-servo differences belong in `pulses`. With
   # `direction` this is the servo-kinematic map; the clamp lives in safety.*_range
   trim:
-    front_right:  [0, 0, -90]
-    middle_right: [0, 0, -90]
-    rear_right:   [0, 0, -90]
-    rear_left:    [0, 0, -90]
-    middle_left:  [0, 0, -90]
-    front_left:   [0, 0, -90]
+    front_right:  [0, 0, -69.5]
+    middle_right: [0, 0, -69.5]
+    rear_right:   [0, 0, -69.5]
+    rear_left:    [0, 0, -69.5]
+    middle_left:  [0, 0, -69.5]
+    front_left:   [0, 0, -69.5]
 
   # Servo direction multipliers (1 or -1), per leg [coxa, femur, tibia]
   direction:
