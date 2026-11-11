@@ -14,6 +14,19 @@ DO_CAPTURE=0
 OUT_DIR="$(pwd)/camera_check"
 FAILURES=()
 
+# pi_camera_setup.sh can swap a source-built libcamera in front of the packaged one, and
+# that is the copy camera_ros loads, so every libcamera check below targets it when present
+ENV_FILE="${PI_CAMERA_ENV:-$HOME/.config/pi-camera-env.sh}"
+env_get() { [[ -f "$ENV_FILE" ]] && grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
+LD_PREFIX="$(env_get PI_CAMERA_LD_PREFIX)"
+IPA_PATH="$(env_get LIBCAMERA_IPA_MODULE_PATH)"
+ENV_TUNING="$(env_get LIBCAMERA_RPI_TUNING_FILE)"
+SRC_LIB_DIR="${LD_PREFIX%%:*}"
+SRC_CAM=""
+[[ -n "$SRC_LIB_DIR" && -x "$(dirname "$SRC_LIB_DIR")/apps/cam/cam" ]] \
+    && SRC_CAM="$(dirname "$SRC_LIB_DIR")/apps/cam/cam"
+run_src_cam() { LD_LIBRARY_PATH="$LD_PREFIX" LIBCAMERA_IPA_MODULE_PATH="$IPA_PATH" "$SRC_CAM" "$@"; }
+
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
@@ -108,13 +121,25 @@ else
     fail "$USER is NOT in the 'video' group"
     note "fix: sudo usermod -aG video $USER   (then log out and back in)"
 fi
+# libcamera hands the sensor to one process at a time, a leftover node blocks every other
+HOLDERS="$(pgrep -af 'camera_ros.*camera_node|rpicam-')"
+if [[ -n "$HOLDERS" ]]; then
+    fail "something is already holding the camera"
+    printf '%s\n' "$HOLDERS" | sed 's/^/        /'
+    note "stop it if it is not yours: pkill -f camera_node"
+else
+    pass "nothing is holding the camera"
+fi
 
 section "Tooling"
 RPICAM=""
 for b in rpicam-hello libcamera-hello; do
     command -v "$b" >/dev/null 2>&1 && { RPICAM="$b"; break; }
 done
-if [[ -n "$RPICAM" ]]; then
+if [[ -n "$SRC_CAM" ]]; then
+    # rpicam-apps links the system libcamera, so it can pass or fail regardless of ROS
+    pass "found cam from the source-built libcamera that camera_ros uses ($SRC_CAM)"
+elif [[ -n "$RPICAM" ]]; then
     pass "found $RPICAM ($(command -v $RPICAM))"
 else
     fail "neither rpicam-hello nor libcamera-hello is installed"
@@ -124,8 +149,12 @@ command -v v4l2-ctl >/dev/null 2>&1 && pass "v4l2-ctl present" \
     || note "v4l-utils not installed (optional): sudo apt install -y v4l-utils"
 
 section "libcamera enumeration"
-if [[ -n "$RPICAM" ]]; then
-    LIST="$($RPICAM --list-cameras 2>&1)"
+if [[ -n "$SRC_CAM" || -n "$RPICAM" ]]; then
+    if [[ -n "$SRC_CAM" ]]; then
+        LIST="$(run_src_cam -l 2>&1)"
+    else
+        LIST="$($RPICAM --list-cameras 2>&1)"
+    fi
     printf '%s\n' "$LIST" | sed 's/^/        /'
     if grep -qi 'imx219' <<< "$LIST"; then
         pass "libcamera sees the IMX219"
@@ -150,7 +179,8 @@ FOUND_ANY=0
 # .../libcamera, newer ones put them in an ipa/ subdirectory. Check both, the
 # distinction matters because LIBCAMERA_IPA_MODULE_PATH must name the exact
 # directory holding the .so files and overrides the built-in search when set
-for d in /usr/lib/*/libcamera        /usr/lib/*/libcamera/ipa \
+for d in ${IPA_PATH//:/ } \
+         /usr/lib/*/libcamera        /usr/lib/*/libcamera/ipa \
          /opt/ros/*/lib/libcamera    /opt/ros/*/lib/libcamera/ipa \
          /usr/local/lib/*/libcamera  /usr/local/lib/*/libcamera/ipa; do
     [[ -d "$d" ]] || continue
@@ -168,7 +198,9 @@ if (( ! FOUND_ANY )); then
 elif (( IS_PI5 )); then
     if [[ -n "$PISP_DIR" ]]; then
         pass "PiSP IPA available in $PISP_DIR"
-        if [[ "$PISP_DIR" != /usr/lib/* ]]; then
+        if [[ ":$IPA_PATH:" == *":$PISP_DIR:"* ]]; then
+            note "this is the source build $ENV_FILE points camera_ros at"
+        elif [[ "$PISP_DIR" != /usr/lib/* ]]; then
             note "the system libcamera lacks PiSP, this prefix has it"
             note "try the default search first, that build usually knows its own path"
             note "only if it reports 'No IPA found': export LIBCAMERA_IPA_MODULE_PATH=$PISP_DIR"
@@ -197,9 +229,15 @@ else
     if [[ -z "$ACTUAL" ]]; then
         skip "no media entities readable"
     else
-        for so in /usr/lib/*/libcamera.so.* /opt/ros/*/lib/libcamera.so.* \
-                  /usr/local/lib/*/libcamera.so.*; do
-            [[ -f "$so" ]] || continue
+        SO_LIST=(/usr/lib/*/libcamera.so.* /opt/ros/*/lib/libcamera.so.* /usr/local/lib/*/libcamera.so.*)
+        if [[ -n "$SRC_LIB_DIR" ]]; then
+            # The packaged copies never load while the override is set, judging them is noise
+            SO_LIST=("$SRC_LIB_DIR"/libcamera.so.*)
+            note "checking the source build only, $ENV_FILE overrides the packaged libcamera"
+        fi
+        for so in "${SO_LIST[@]}"; do
+            # Skip the soname symlinks so each library is judged once
+            [[ -f "$so" && ! -L "$so" ]] || continue
             WANT="$(strings "$so" 2>/dev/null | grep -E '^rp1-cfe-' | sort -u)"
             [[ -n "$WANT" ]] || continue
             MISSING=""
@@ -219,27 +257,60 @@ else
     fi
 fi
 
+section "libcamera loaded by camera_node"
+# The override only works while camera_node's soname (major.minor) matches the source
+# build. A ROS sync that bumps libcamera to a new minor silently falls back to the
+# packaged copy, which cannot see the sensor on this kernel
+CAM_NODE="$(ls /opt/ros/*/lib/camera_ros/camera_node 2>/dev/null | head -1)"
+if [[ -z "$SRC_LIB_DIR" ]]; then
+    skip "no PI_CAMERA_LD_PREFIX in $ENV_FILE, camera_node uses the packaged libcamera"
+elif [[ -z "$CAM_NODE" ]]; then
+    skip "no camera_ros camera_node under /opt/ros"
+else
+    LINKED="$(LD_LIBRARY_PATH="$LD_PREFIX" ldd "$CAM_NODE" 2>/dev/null | grep -E 'libcamera\.so' | sed 's/^[[:space:]]*//')"
+    if [[ "$LINKED" == *"=> $SRC_LIB_DIR/"* ]]; then
+        pass "camera_node resolves ${LINKED%% *} to the source build"
+    else
+        fail "camera_node does not load the source-built libcamera"
+        note "ldd: ${LINKED:-no libcamera dependency found}"
+        note "source build provides: $(ls "$SRC_LIB_DIR" | grep -E '^libcamera\.so\.[0-9]+\.[0-9]+$' | tr '\n' ' ')"
+        note "the versions must match: ./scripts/pi_camera_setup.sh build, once the fork reaches it"
+    fi
+fi
+
 section "NoIR tuning file"
 # libcamera cannot tell a NoIR IMX219 from the standard one, both report as 'imx219'.
 # Without the NoIR tuning file the auto white balance is wrong and daylight shots come out pink.
 TUNING=""
-for t in /usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json \
+for t in "$ENV_TUNING" \
+         /opt/ros/*/share/libcamera/ipa/rpi/pisp/imx219_noir.json \
+         /usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json \
          /usr/share/libcamera/ipa/rpi/vc4/imx219_noir.json; do
-    [[ -f "$t" ]] && { TUNING="$t"; break; }
+    [[ -n "$t" && -f "$t" ]] && { TUNING="$t"; break; }
 done
 if [[ -n "$TUNING" ]]; then
     pass "found $TUNING"
     (( IS_PI5 )) && [[ "$TUNING" == *"/vc4/"* ]] \
         && note "this is the vc4 tuning, a Pi 5 wants the pisp one, expect it to appear once libcamera is up to date"
-    note "use it with: export LIBCAMERA_RPI_TUNING_FILE=$TUNING"
+    if [[ "$TUNING" == "$ENV_TUNING" ]]; then
+        note "already applied through $ENV_FILE"
+    else
+        note "use it with: export LIBCAMERA_RPI_TUNING_FILE=$TUNING"
+    fi
 else
-    fail "no imx219_noir.json tuning file found under /usr/share/libcamera/ipa/rpi"
+    [[ -n "$ENV_TUNING" ]] && note "$ENV_FILE points at $ENV_TUNING, which does not exist"
+    fail "no imx219_noir.json tuning file found"
     note "colours will be off until this is available, it ships with rpicam-apps / libcamera-ipa"
 fi
 
 if (( DO_CAPTURE )); then
     section "Capture"
-    if [[ -z "$RPICAM" ]]; then
+    if [[ -n "$SRC_CAM" ]]; then
+        FRAMES="$(run_src_cam -c1 -C10 2>&1 | grep -c ' seq: ')"
+        (( FRAMES >= 10 )) && pass "the source-built libcamera captured $FRAMES frames" \
+                           || fail "the source-built libcamera captured $FRAMES of 10 frames"
+        note "to test the ROS side as well: ./scripts/pi_camera_setup.sh test"
+    elif [[ -z "$RPICAM" ]]; then
         skip "no capture binary"
     else
         mkdir -p "$OUT_DIR"
