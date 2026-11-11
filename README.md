@@ -1,8 +1,8 @@
-# ROS2 Python Hexapod Controller Node
+# ROS2 Python H-0996 Controller Node
 
-This repository contains a ROS2 python node wrapping the [hexapod controller](https://github.com/ggldnl/Hexapod-Controller.git).
+This repository contains a ROS2 python node wrapping the [hexapod controller](https://github.com/ggldnl/H-0996-Controller.git).
 
-For a complete overview of the project refer to the [main Hexapod repository](https://github.com/ggldnl/Hexapod.git).
+For a complete overview of the project refer to the [main H-0996 repository](https://github.com/ggldnl/H-0996.git).
 
 ## 🛠️ Setup
 
@@ -31,17 +31,17 @@ A ROS best practice is to put any packages in the workspace into the `src` direc
 
 ```bash
 cd ~/ros_ws/src  # use your actual ROS workspace
-git clone https://github.com/ggldnl/Hexapod-ROS-Python.git
+git clone https://github.com/ggldnl/H-0996-ROS-Python.git
 ```
 
 ### Install the controller
 
-Building this node will require the [python controller](https://github.com/ggldnl/Hexapod-Controller.git) to be installed as a python package.
+Building this node will require the [python controller](https://github.com/ggldnl/H-0996-Controller.git) to be installed as a python package.
 The node imports it to open the serial link and provision the board, so the framing and the wire protocol stay in one place.
 When `colcon build` installs the node it only knows about packaged code installed for system python. Install the controller with the `serial` extra so it pulls in pyserial for the real UART:
 
 ```bash
-pip install --break-system-packages "hexapod-controller[serial] @ git+https://github.com/ggldnl/Hexapod-Controller.git"
+pip install --break-system-packages "hexapod-controller[serial] @ git+https://github.com/ggldnl/H-0996-Controller.git"
 ```
 
 ### Build the package 
@@ -145,4 +145,4 @@ The `Unable to open camera calibration file` warning on startup is harmless, it 
 
 ## 🤝 Contribution
 
-Feel free to contribute by opening issues or submitting pull requests. For further information, check out the [main Hexapod repository](https://github.com/ggldnl/Hexapod). Give a ⭐️ to this project if you liked the content.
+Feel free to contribute by opening issues or submitting pull requests. For further information, check out the [main H-0996 repository](https://github.com/ggldnl/H-0996). Give a ⭐️ to this project if you liked the content.
