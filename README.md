@@ -1,8 +1,8 @@
-# ROS2 Python Hexapod Controller Node
+# ROS2 Python H-0996 Controller Node
 
 This repository contains a ROS2 python node wrapping the [hexapod controller](https://github.com/ggldnl/Hexapod-Controller.git).
 
-For a complete overview of the project refer to the [main Hexapod repository](https://github.com/ggldnl/Hexapod.git).
+For a complete overview of the project refer to the [main H-0996 repository](https://github.com/ggldnl/Hexapod.git).
 
 ## 🛠️ Setup
 
@@ -145,4 +145,4 @@ The `Unable to open camera calibration file` warning on startup is harmless, it 
 
 ## 🤝 Contribution
 
-Feel free to contribute by opening issues or submitting pull requests. For further information, check out the [main Hexapod repository](https://github.com/ggldnl/Hexapod). Give a ⭐️ to this project if you liked the content.
+Feel free to contribute by opening issues or submitting pull requests. For further information, check out the [main H-0996 repository](https://github.com/ggldnl/Hexapod). Give a ⭐️ to this project if you liked the content.
