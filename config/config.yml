@@ -1,4 +1,4 @@
-# Hexapod robot configuration.
+# H-0996 robot configuration.
 #
 # The controller pushes these to the Servo2040 at connect (provisioning), one
 # section per message, before enable(). The board ships with baked defaults, 
